@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, MicOff, Volume2 } from "lucide-react";
+import { Mic, MicOff, Play, Volume2 } from "lucide-react";
 import { characters, getCharacterLines } from "@/lib/script";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 
@@ -9,21 +9,24 @@ import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
  */
 
 export default function Home() {
-  const [selectedCharacterId, setSelectedCharacterId] = useState<string>("joao");
+  const [selectedCharacterId, setSelectedCharacterId] =
+    useState<string>("joao");
   const [currentLineIndex, setCurrentLineIndex] = useState(0);
   const [transcript, setTranscript] = useState("");
   const [showFlash, setShowFlash] = useState(false);
   const flashTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   // Áudio refs e estados
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isSpeakingLine, setIsSpeakingLine] = useState(false);
   const wasListeningBeforeAudio = useRef(false);
 
   // Hook de reconhecimento de voz estável
   const {
     isListening,
     isSupported,
+    error: speechError,
     start: startListening,
     stop: stopListening,
   } = useSpeechRecognition({
@@ -37,7 +40,7 @@ export default function Home() {
         if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
         flashTimeoutRef.current = setTimeout(() => setShowFlash(false), 3000);
       }
-    }
+    },
   });
 
   const selectedCharacter = characters.find(c => c.id === selectedCharacterId);
@@ -45,40 +48,91 @@ export default function Home() {
   const allLines = characterLines;
   const currentLine = allLines[currentLineIndex];
 
-  // Função mestre para tocar áudio (Corrige bug de celular e áudio duplo)
-  const playSound = (url: string) => {
-    // 1. Para áudio anterior se existir
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current.currentTime = 0;
-    }
+  useEffect(() => {
+    return () => {
+      if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+      activeAudioRef.current?.pause();
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
 
-    // 2. No celular, o microfone bloqueia o áudio. Pausamos a escuta.
+  const pauseMicForAudio = () => {
     if (isListening) {
       wasListeningBeforeAudio.current = true;
       stopListening();
     } else {
       wasListeningBeforeAudio.current = false;
     }
+  };
+
+  const resumeMicAfterAudio = () => {
+    setIsPlayingAudio(false);
+    setIsSpeakingLine(false);
+    if (wasListeningBeforeAudio.current) {
+      startListening();
+    }
+  };
+
+  const stopCurrentAudio = () => {
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current.currentTime = 0;
+    }
+    window.speechSynthesis?.cancel();
+    setIsPlayingAudio(false);
+    setIsSpeakingLine(false);
+  };
+
+  // Função mestre para tocar áudio (Corrige bug de celular e áudio duplo)
+  const playSound = (url: string) => {
+    // 1. Para áudio anterior se existir
+    stopCurrentAudio();
+
+    // 2. No celular, o microfone bloqueia o áudio. Pausamos a escuta.
+    pauseMicForAudio();
 
     // 3. Configura e toca o novo áudio
     const audio = new Audio(url);
     activeAudioRef.current = audio;
-    
+
     audio.onplay = () => setIsPlayingAudio(true);
-    audio.onended = () => {
-      setIsPlayingAudio(false);
-      // 4. Reativa microfone se estava ligado
-      if (wasListeningBeforeAudio.current) {
-        startListening();
-      }
-    };
+    audio.onended = resumeMicAfterAudio;
 
     audio.play().catch(err => {
       console.error("Erro ao tocar áudio:", err);
-      setIsPlayingAudio(false);
-      if (wasListeningBeforeAudio.current) startListening();
+      resumeMicAfterAudio();
     });
+  };
+
+  const speakLine = (line = currentLine) => {
+    if (!line || !("speechSynthesis" in window)) return;
+
+    stopCurrentAudio();
+    pauseMicForAudio();
+
+    const utterance = new SpeechSynthesisUtterance(
+      `${line.character}. ${line.text}`
+    );
+    utterance.lang = "pt-BR";
+    utterance.rate = 0.92;
+    utterance.onstart = () => {
+      setIsPlayingAudio(true);
+      setIsSpeakingLine(true);
+    };
+    utterance.onend = resumeMicAfterAudio;
+    utterance.onerror = resumeMicAfterAudio;
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleNextLineWithAudio = () => {
+    if (currentLineIndex >= allLines.length - 1) return;
+
+    const nextIndex = currentLineIndex + 1;
+    const nextLine = allLines[nextIndex];
+    setCurrentLineIndex(nextIndex);
+    setTranscript("");
+    window.setTimeout(() => speakLine(nextLine), 80);
   };
 
   const handleToggleListening = () => {
@@ -143,8 +197,12 @@ export default function Home() {
 
       {/* Header / Cover */}
       <header className="max-w-2xl w-full text-center py-12 border-b border-[#5a3a1a] mb-10">
-        <h1 className="cordel-title text-5xl md:text-6xl font-bold mb-2">O Auto da Compadecida</h1>
-        <p className="text-xl italic text-[#c8a87a]">Teleprompter para Teatro</p>
+        <h1 className="cordel-title text-5xl md:text-6xl font-bold mb-2">
+          O Auto da Compadecida
+        </h1>
+        <p className="text-xl italic text-[#c8a87a]">
+          Teleprompter para Teatro
+        </p>
       </header>
 
       {/* Mic & Audio Control Bar */}
@@ -152,35 +210,55 @@ export default function Home() {
         <div className="flex items-center gap-4 flex-wrap">
           <button
             onClick={handleToggleListening}
-            className={`mic-btn ${isListening ? 'active' : ''}`}
+            disabled={!isSupported}
+            className={`mic-btn ${isListening ? "active" : ""}`}
+            title={
+              isSupported
+                ? "Iniciar reconhecimento pelo microfone"
+                : "Reconhecimento de voz indisponível"
+            }
           >
             {isListening ? <MicOff size={18} /> : <Mic size={18} />}
-            {isListening ? 'Ouvindo...' : 'Ligar Microfone'}
+            {isListening ? "Ouvindo..." : "Ligar Microfone"}
           </button>
-          
+
           <div className="flex gap-3">
-            <button 
-              onClick={() => playSound("https://www.soundjay.com/buttons/sounds/button-3.mp3")}
+            <button
+              onClick={() =>
+                isSpeakingLine ? stopCurrentAudio() : speakLine()
+              }
               className="audio-btn"
             >
-              <Volume2 size={16} /> Áudio 1
+              <Volume2 size={16} />{" "}
+              {isSpeakingLine ? "Parar áudio" : "Ouvir fala"}
             </button>
-            <button 
-              onClick={() => playSound("https://www.soundjay.com/buttons/sounds/button-4.mp3")}
+            <button
+              onClick={handleNextLineWithAudio}
+              disabled={currentLineIndex === allLines.length - 1}
               className="audio-btn"
             >
-              <Volume2 size={16} /> Áudio 2
+              <Play size={16} /> Próxima + áudio
             </button>
           </div>
         </div>
-        
-        <div className={`italic text-sm transition-colors ${transcript ? 'text-[#f5ead6]' : 'text-[#c8a87a]'}`}>
-          {isListening ? (transcript || 'Aguardando fala...') : isPlayingAudio ? 'Tocando áudio (Microfone pausado)' : 'Microfone desligado'}
+
+        <div
+          className={`italic text-sm transition-colors ${transcript ? "text-[#f5ead6]" : "text-[#c8a87a]"}`}
+        >
+          {speechError
+            ? `${speechError} Use os botões de áudio manual.`
+            : isListening
+              ? transcript || "Aguardando fala..."
+              : isPlayingAudio
+                ? "Tocando áudio (Microfone pausado)"
+                : "Microfone desligado"}
         </div>
       </div>
 
       {/* Heard Flash */}
-      <div className={`max-w-2xl w-full mb-4 p-3 border border-[#8b3a0f] bg-[#8b3a0f26] rounded-sm italic text-[#f5ead6] transition-opacity duration-500 ${showFlash ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div
+        className={`max-w-2xl w-full mb-4 p-3 border border-[#8b3a0f] bg-[#8b3a0f26] rounded-sm italic text-[#f5ead6] transition-opacity duration-500 ${showFlash ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+      >
         🎤 Reconhecido: {transcript}
       </div>
 
@@ -217,32 +295,42 @@ export default function Home() {
 
         {/* Navigation Controls */}
         <div className="mt-12 pt-6 border-t border-[#c8a87a] flex justify-between items-center">
-          <button 
+          <button
             onClick={() => setCurrentLineIndex(prev => Math.max(0, prev - 1))}
             disabled={currentLineIndex === 0}
             className="text-[#8b3a0f] font-bold uppercase tracking-tighter disabled:opacity-30 text-sm"
           >
             ← Anterior
           </button>
-          
+
           <div className="flex flex-col items-center gap-1">
-            <span className="text-[10px] uppercase text-[#8b3a0f] font-bold">Personagem</span>
-            <select 
+            <span className="text-[10px] uppercase text-[#8b3a0f] font-bold">
+              Personagem
+            </span>
+            <select
               value={selectedCharacterId}
-              onChange={(e) => {
+              onChange={e => {
                 setSelectedCharacterId(e.target.value);
                 setCurrentLineIndex(0);
+                stopCurrentAudio();
               }}
               className="bg-transparent border-b border-[#8b3a0f] text-[#8b3a0f] font-bold outline-none text-base cursor-pointer"
             >
               {characters.map(c => (
-                <option key={c.id} value={c.id}>{c.displayName}</option>
+                <option key={c.id} value={c.id}>
+                  {c.displayName}
+                </option>
               ))}
             </select>
           </div>
 
-          <button 
-            onClick={() => setCurrentLineIndex(prev => Math.min(allLines.length - 1, prev + 1))}
+          <button
+            onClick={() => {
+              stopCurrentAudio();
+              setCurrentLineIndex(prev =>
+                Math.min(allLines.length - 1, prev + 1)
+              );
+            }}
             disabled={currentLineIndex === allLines.length - 1}
             className="text-[#8b3a0f] font-bold uppercase tracking-tighter disabled:opacity-30 text-sm"
           >
@@ -252,7 +340,8 @@ export default function Home() {
       </main>
 
       <footer className="mt-10 text-[#c8a87a] text-xs italic text-center max-w-md">
-        * Para o áudio funcionar no celular, o microfone é pausado automaticamente durante a reprodução.
+        * Para o áudio funcionar no celular, o microfone é pausado
+        automaticamente durante a reprodução.
       </footer>
     </div>
   );
