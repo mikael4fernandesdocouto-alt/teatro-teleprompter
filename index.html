@@ -17,6 +17,10 @@ body{background:var(--bg);min-height:100vh;font-family:'Crimson Text',Georgia,se
 .mic-btn:hover{background:#c9622a}
 .mic-btn.active{background:#2a6e2a}
 .mic-btn svg{width:18px;height:18px;fill:#fff;flex-shrink:0}
+.manual-audio-btn{display:flex;align-items:center;gap:8px;background:#6b4c2a;color:#fff;border:1px solid #8b3a0f;border-radius:3px;padding:10px 16px;font-family:'Crimson Text',serif;font-size:1rem;cursor:pointer;transition:background .2s,transform .1s}
+.manual-audio-btn:hover{background:#8b3a0f}
+.manual-audio-btn:active{transform:scale(.97)}
+.manual-audio-btn svg{width:18px;height:18px;fill:#fff;flex-shrink:0}
 .mic-status{font-family:'Crimson Text',serif;font-size:.9rem;color:#c8a87a;font-style:italic;flex:1}
 .mic-status.heard{color:#f5ead6}
 .heard-flash{display:none;align-items:center;gap:8px;background:rgba(139,58,15,.15);border:1px solid #8b3a0f;border-radius:3px;padding:8px 14px;max-width:720px;width:100%;margin-bottom:1rem;font-family:'Crimson Text',serif;font-size:.95rem;color:#f5ead6;font-style:italic}
@@ -45,6 +49,14 @@ body{background:var(--bg);min-height:100vh;font-family:'Crimson Text',Georgia,se
   <button class="mic-btn" id="micBtn" onclick="toggleMic()">
     <svg viewBox="0 0 24 24"><path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-1 17.93V21H9v2h6v-2h-2v-2.07A8 8 0 0 0 20 11h-2a6 6 0 0 1-12 0H4a8 8 0 0 0 7 7.93z"/></svg>
     <span>Ativar microfone</span>
+  </button>
+  <button class="manual-audio-btn" onclick="playManualAudio('a1')">
+    <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12z"/></svg>
+    <span>Soltar 1º áudio</span>
+  </button>
+  <button class="manual-audio-btn" onclick="playManualAudio('a2')">
+    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5zM5 5h2v14H5V5z"/></svg>
+    <span>Soltar próximo áudio</span>
   </button>
   <span class="mic-status" id="micStatus">Microfone desligado — clique para ativar</span>
 </div>
@@ -309,6 +321,13 @@ function fireAudio(id, label, heard){
   document.getElementById("pb-"+id).classList.add("on");
   audio.onended = function(){ document.getElementById("pb-"+id).classList.remove("on"); };
   showFlash('"'+heard+'" → '+label);
+}
+
+function playManualAudio(id){
+  var tr = triggers.filter(function(item){ return item.audio === id; })[0];
+  if(!tr) return;
+  cooldown[id] = false;
+  fireAudio(id, tr.label, "botão manual");
 }
 
 function showFlash(msg){
